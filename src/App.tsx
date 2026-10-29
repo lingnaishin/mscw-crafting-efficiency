@@ -32,8 +32,11 @@ import type { Catalog, PriceOverrides, Recipe, ScoredRecipe } from "./lib/types"
 
 const DATA = catalog as Catalog;
 
+const LIST_SLUG = "list";
+
 function readHash() {
   const slug = window.location.hash.replace(/^#\/?/, "");
+  if (slug === LIST_SLUG) return LIST_SLUG;
   return DISCIPLINES.some((d) => d.slug === slug) ? slug : "";
 }
 
@@ -146,6 +149,33 @@ function RecipeRow({ scored, rank }: { scored: ScoredRecipe; rank?: number }) {
 const PLANNER_KEY = "mscw-planner";
 const OVERRIDES_KEY = "mscw-price-overrides";
 const PINS_KEY = "mscw-pinned";
+const LIST_KEY = "mscw-craft-list";
+
+type CraftListItem = { recipeId: number; qty: number };
+type CraftListState = { items: CraftListItem[]; have: Record<string, number> };
+
+function loadCraftList(): CraftListState {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LIST_KEY) || "");
+    const items: CraftListItem[] = Array.isArray(raw.items)
+      ? raw.items
+          .filter(
+            (row: CraftListItem) =>
+              row && typeof row.recipeId === "number" && typeof row.qty === "number" && row.qty > 0
+          )
+          .map((row: CraftListItem) => ({ recipeId: row.recipeId, qty: Math.min(9999, Math.round(row.qty)) }))
+      : [];
+    const have: Record<string, number> = {};
+    if (raw.have && typeof raw.have === "object") {
+      for (const [key, value] of Object.entries(raw.have)) {
+        if (typeof value === "number" && Number.isFinite(value) && value > 0) have[key] = Math.round(value);
+      }
+    }
+    return { items, have };
+  } catch {
+    return { items: [], have: {} };
+  }
+}
 
 function loadOverrides(): PriceOverrides {
   try {
@@ -211,6 +241,76 @@ function cmpPinned(aId: number, bId: number, pins: number[]) {
   if (ai !== -1) return -1;
   if (bi !== -1) return 1;
   return 0;
+}
+
+function AddToListButton({
+  added,
+  label,
+  onAdd,
+}: {
+  added?: boolean;
+  label: string;
+  onAdd: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`add-list-btn ${added ? "added" : ""}`}
+      aria-label={added ? `${label} is on the craft list. Add more` : `Add ${label} to craft list`}
+      title={added ? "On craft list — click to add more" : "Add to craft list"}
+      onClick={onAdd}
+    >
+      +
+    </button>
+  );
+}
+
+function QtyInput({
+  value,
+  min = 0,
+  max = 9999,
+  onChange,
+  ariaLabel,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (value: number) => void;
+  ariaLabel: string;
+}) {
+  const [text, setText] = useState(() => (value ? String(value) : ""));
+  useEffect(() => {
+    setText(value ? String(value) : "");
+  }, [value]);
+  return (
+    <input
+      className="price-edit"
+      type="number"
+      min={min}
+      max={max}
+      step={1}
+      inputMode="numeric"
+      aria-label={ariaLabel}
+      placeholder="0"
+      value={text}
+      onChange={(e) => {
+        const raw = e.target.value;
+        if (raw === "") {
+          setText("");
+          onChange(0);
+          return;
+        }
+        if (!/^\d{0,4}$/.test(raw)) return;
+        setText(raw);
+        onChange(Math.min(max, Number(raw)));
+      }}
+      onBlur={() => {
+        const next = Math.min(max, Math.max(min, Math.round(Number(text) || 0)));
+        onChange(next);
+        setText(next ? String(next) : "");
+      }}
+    />
+  );
 }
 
 function PinButton({
@@ -318,18 +418,284 @@ function loadPlanner(): PlannerState {
   }
 }
 
+function CraftList({
+  priced,
+  state,
+  setState,
+  onPrice,
+}: {
+  priced: ScoredRecipe[];
+  state: CraftListState;
+  setState: (next: CraftListState | ((prev: CraftListState) => CraftListState)) => void;
+  onPrice: (id: number | null, name: string, value: number | null) => void;
+}) {
+  const [addQuery, setAddQuery] = useState("");
+  const byId = useMemo(() => new Map(priced.map((row) => [row.recipe.id, row])), [priced]);
+  const matches = useMemo(() => {
+    const q = addQuery.trim().toLowerCase();
+    if (q.length < 1) return [];
+    return priced
+      .filter(
+        (row) =>
+          row.recipe.name.toLowerCase().includes(q) ||
+          row.recipe.discipline.toLowerCase().includes(q) ||
+          row.recipe.ingredients.some((ing) => ing.name.toLowerCase().includes(q))
+      )
+      .slice(0, 10);
+  }, [addQuery, priced]);
+  const listed = state.items
+    .map((row) => {
+      const scored = byId.get(row.recipeId);
+      return scored ? { ...row, scored } : null;
+    })
+    .filter((row): row is CraftListItem & { scored: ScoredRecipe } => row != null);
+
+  const produced = new Map<string, number>();
+  for (const row of listed) {
+    const key = priceKey(row.scored.recipe.outputId, row.scored.recipe.name);
+    produced.set(key, (produced.get(key) ?? 0) + row.scored.recipe.resultCount * row.qty);
+  }
+
+  type NeedRow = {
+    key: string;
+    id: number | null;
+    name: string;
+    need: number;
+    unit: number | null;
+    overridden: boolean;
+  };
+  const needMap = new Map<string, NeedRow>();
+  for (const row of listed) {
+    for (const ing of row.scored.ingredients) {
+      const key = priceKey(ing.id, ing.name);
+      const prev = needMap.get(key);
+      if (prev) {
+        prev.need += ing.count * row.qty;
+        if (prev.unit == null) prev.unit = ing.unit;
+        prev.overridden = prev.overridden || ing.overridden;
+      } else {
+        needMap.set(key, {
+          key,
+          id: ing.id,
+          name: ing.name,
+          need: ing.count * row.qty,
+          unit: ing.unit,
+          overridden: ing.overridden,
+        });
+      }
+    }
+  }
+  const ingredients = [...needMap.values()]
+    .map((row) => {
+      const have = state.have[row.key] ?? 0;
+      const made = produced.get(row.key) ?? 0;
+      const remaining = Math.max(0, row.need - have - made);
+      const cost = row.unit != null ? remaining * row.unit : null;
+      return { ...row, have, made, remaining, cost };
+    })
+    .sort((a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name));
+
+  const fee = listed.reduce((sum, row) => sum + row.scored.fee * row.qty, 0);
+  const matCost = ingredients.reduce((sum, row) => (row.cost != null ? sum + row.cost : sum), 0);
+  const matsPriced = ingredients.every((row) => row.remaining === 0 || row.cost != null);
+  const exp = listed.reduce((sum, row) => sum + row.scored.recipe.exp * row.qty, 0);
+
+  const addRecipe = (recipeId: number, qty = 1) => {
+    const add = Math.max(1, Math.round(qty));
+    setState((prev) => {
+      const existing = prev.items.find((row) => row.recipeId === recipeId);
+      const items = existing
+        ? prev.items.map((row) =>
+            row.recipeId === recipeId ? { ...row, qty: Math.min(9999, row.qty + add) } : row
+          )
+        : [...prev.items, { recipeId, qty: add }];
+      return { ...prev, items };
+    });
+    setAddQuery("");
+  };
+
+  const setQty = (recipeId: number, qty: number) => {
+    setState((prev) => ({
+      ...prev,
+      items:
+        qty <= 0
+          ? prev.items.filter((row) => row.recipeId !== recipeId)
+          : prev.items.map((row) => (row.recipeId === recipeId ? { ...row, qty } : row)),
+    }));
+  };
+
+  const setHave = (key: string, qty: number) => {
+    setState((prev) => {
+      const have = { ...prev.have };
+      if (qty <= 0) delete have[key];
+      else have[key] = qty;
+      return { ...prev, have };
+    });
+  };
+
+  return (
+    <section className="table-card craft-list">
+      <h2>Craft list</h2>
+      <p className="muted">
+        Track what you want to make. Ingredients add up across every recipe. Amounts you already have, or that you are also crafting on this list, are subtracted from what you still need to gather.
+      </p>
+      <div className="planner-form">
+        <label className="list-add">
+          Add a recipe
+          <input
+            className="search"
+            value={addQuery}
+            onChange={(e) => setAddQuery(e.target.value)}
+            placeholder="Search name or material"
+          />
+        </label>
+        {state.items.length > 0 && (
+          <button className="btn ghost" onClick={() => setState({ items: [], have: state.have })}>
+            Clear items
+          </button>
+        )}
+        {Object.keys(state.have).length > 0 && (
+          <button className="btn ghost" onClick={() => setState({ items: state.items, have: {} })}>
+            Clear have
+          </button>
+        )}
+      </div>
+      {matches.length > 0 && (
+        <div className="list-suggest">
+          {matches.map((row) => (
+            <button
+              key={row.recipe.id}
+              className="list-suggest-row"
+              onClick={() => addRecipe(row.recipe.id)}
+            >
+              <ItemLink id={row.recipe.outputId} name={recipeLabel(row.recipe)} />
+              <span className="muted">
+                {row.recipe.discipline} · Lv. {row.recipe.level}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="stats">
+        <span className="badge">{listed.length} recipes</span>
+        <span className="badge">{exp.toLocaleString()} EXP</span>
+        <span className="badge">Fee {formatMesos(fee)}</span>
+        <span className="badge">{matsPriced ? `Mats left ${formatMesos(matCost)}` : "Mats left —"}</span>
+      </div>
+      <div className="list-grid">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Item to make</th>
+                <th className="num">Qty</th>
+                <th className="num">Fee</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {listed.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="muted">
+                    Search above, or tap + on a planner or efficiency row.
+                  </td>
+                </tr>
+              )}
+              {listed.map((row) => (
+                <tr key={row.recipeId}>
+                  <td>
+                    <ItemLink id={row.scored.recipe.outputId} name={recipeLabel(row.scored.recipe)} />
+                    <div className="muted">
+                      {row.scored.recipe.discipline} · Lv. {row.scored.recipe.level}
+                      {row.scored.recipe.resultCount > 1 ? ` · ${row.scored.recipe.resultCount} per craft` : ""}
+                    </div>
+                  </td>
+                  <td className="num price-cell">
+                    <QtyInput
+                      value={row.qty}
+                      min={0}
+                      ariaLabel={`${row.scored.recipe.name} quantity`}
+                      onChange={(qty) => setQty(row.recipeId, qty)}
+                    />
+                  </td>
+                  <td className="num">{formatMesos(row.scored.fee * row.qty)}</td>
+                  <td>
+                    <button className="btn ghost" onClick={() => setQty(row.recipeId, 0)}>
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Ingredient</th>
+                <th className="num">Need</th>
+                <th className="num">Have</th>
+                <th className="num">From list</th>
+                <th className="num">Still need</th>
+                <th className="num">Price</th>
+                <th className="num">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ingredients.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="muted">
+                    Ingredients show up once you add something to make.
+                  </td>
+                </tr>
+              )}
+              {ingredients.map((row) => (
+                <tr key={row.key} className={row.remaining === 0 ? "covered-row" : undefined}>
+                  <td>
+                    <ItemLink id={row.id} name={row.name} />
+                  </td>
+                  <td className="num">{row.need.toLocaleString()}</td>
+                  <td className="num price-cell">
+                    <QtyInput value={row.have} ariaLabel={`${row.name} on hand`} onChange={(qty) => setHave(row.key, qty)} />
+                  </td>
+                  <td className="num">{row.made ? row.made.toLocaleString() : "—"}</td>
+                  <td className={`num ${row.remaining === 0 ? "profit" : ""}`}>{row.remaining.toLocaleString()}</td>
+                  <td className="num price-cell">
+                    <PriceInput
+                      value={row.unit}
+                      custom={row.overridden}
+                      ariaLabel={`${row.name} price`}
+                      onChange={(next) => onPrice(row.id, row.name, next)}
+                    />
+                  </td>
+                  <td className="num">{formatMesos(row.cost)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function LevelPlanner({
   priced,
   forcedDiscipline,
   onPrice,
   pins,
   onTogglePin,
+  listedIds,
+  onAddToList,
 }: {
   priced: ScoredRecipe[];
   forcedDiscipline?: string;
   onPrice: (id: number | null, name: string, value: number | null) => void;
   pins: number[];
   onTogglePin: (id: number) => void;
+  listedIds: number[];
+  onAddToList: (recipeId: number, qty?: number) => void;
 }) {
   const cap = 10;
   const [state, setState] = useState(loadPlanner);
@@ -606,6 +972,11 @@ function LevelPlanner({
                           label={row.recipe.name}
                           onToggle={() => onTogglePin(row.recipe.id)}
                         />
+                        <AddToListButton
+                          added={listedIds.includes(row.recipe.id)}
+                          label={row.recipe.name}
+                          onAdd={() => onAddToList(row.recipe.id, crafts && crafts > 0 ? crafts : 1)}
+                        />
                         <div>
                           <ItemLink id={row.recipe.outputId} name={recipeLabel(row.recipe)} />
                           <div className="muted">Lv. {row.recipe.level} · {row.recipe.outputType}</div>
@@ -686,11 +1057,15 @@ function DetailRow({
   onPrice,
   pinned,
   onTogglePin,
+  listed,
+  onAddToList,
 }: {
   scored: ScoredRecipe;
   onPrice: (id: number | null, name: string, value: number | null) => void;
   pinned: boolean;
   onTogglePin: (id: number) => void;
+  listed: boolean;
+  onAddToList: (recipeId: number, qty?: number) => void;
 }) {
   const { recipe } = scored;
   return (
@@ -698,6 +1073,7 @@ function DetailRow({
       <td>
         <div className="recipe-cell">
           <PinButton pinned={pinned} label={recipe.name} onToggle={() => onTogglePin(recipe.id)} />
+          <AddToListButton added={listed} label={recipe.name} onAdd={() => onAddToList(recipe.id)} />
           <ItemLink id={recipe.outputId} name={recipeLabel(recipe)} />
         </div>
       </td>
@@ -739,6 +1115,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<PriceOverrides>(loadOverrides);
   const [pins, setPins] = useState<number[]>(loadPins);
+  const [craftList, setCraftList] = useState<CraftListState>(loadCraftList);
 
   useEffect(() => {
     localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides));
@@ -747,6 +1124,24 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(PINS_KEY, JSON.stringify(pins));
   }, [pins]);
+
+  useEffect(() => {
+    localStorage.setItem(LIST_KEY, JSON.stringify(craftList));
+  }, [craftList]);
+
+  const listedIds = craftList.items.map((row) => row.recipeId);
+  const addToList = (recipeId: number, qty = 1) => {
+    const add = Math.max(1, Math.round(qty));
+    setCraftList((prev) => {
+      const existing = prev.items.find((row) => row.recipeId === recipeId);
+      const items = existing
+        ? prev.items.map((row) =>
+            row.recipeId === recipeId ? { ...row, qty: Math.min(9999, row.qty + add) } : row
+          )
+        : [...prev.items, { recipeId, qty: add }];
+      return { ...prev, items };
+    });
+  };
 
   const onTogglePin = (id: number) => {
     setPins((prev) => (prev.includes(id) ? prev.filter((pin) => pin !== id) : [...prev, id]));
@@ -869,8 +1264,13 @@ export function App() {
     }
   };
 
-  const current = DISCIPLINES.find((d) => d.slug === view);
+  const onList = view === LIST_SLUG;
+  const current = onList ? undefined : DISCIPLINES.find((d) => d.slug === view);
   const disciplineRows = current ? scored.filter((row) => row.recipe.discipline === current.name) : [];
+  const openList = () => {
+    window.location.hash = `/${LIST_SLUG}`;
+    setView(LIST_SLUG);
+  };
 
   return (
     <div className="app">
@@ -920,6 +1320,10 @@ export function App() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search recipes or materials"
         />
+        <button className={`btn ${onList ? "active" : ""}`} onClick={openList}>
+          Craft list
+          {craftList.items.length > 0 ? ` (${craftList.items.length})` : ""}
+        </button>
       </div>
 
       <div className="stats">
@@ -928,11 +1332,29 @@ export function App() {
         <span className="badge">{complete.length} fully priced</span>
       </div>
 
-      {!current && (
-        <LevelPlanner priced={priced} onPrice={onPrice} pins={pins} onTogglePin={onTogglePin} />
+      {onList && (
+        <>
+          <div className="crumbs">
+            <button className="btn ghost" onClick={() => { window.location.hash = ""; setView(""); }}>
+              ← All disciplines
+            </button>
+          </div>
+          <CraftList priced={priced} state={craftList} setState={setCraftList} onPrice={onPrice} />
+        </>
       )}
 
-      {!current && (
+      {!current && !onList && (
+        <LevelPlanner
+          priced={priced}
+          onPrice={onPrice}
+          pins={pins}
+          onTogglePin={onTogglePin}
+          listedIds={listedIds}
+          onAddToList={addToList}
+        />
+      )}
+
+      {!current && !onList && (
         <>
           <section className="grid">
             {DISCIPLINES.map((d) => {
@@ -1041,7 +1463,15 @@ export function App() {
             </span>
           </div>
 
-          <LevelPlanner priced={priced} forcedDiscipline={current.name} onPrice={onPrice} pins={pins} onTogglePin={onTogglePin} />
+          <LevelPlanner
+            priced={priced}
+            forcedDiscipline={current.name}
+            onPrice={onPrice}
+            pins={pins}
+            onTogglePin={onTogglePin}
+            listedIds={listedIds}
+            onAddToList={addToList}
+          />
 
           {CRAFT_LEVELS.map((level) => {
             const rows = disciplineRows
@@ -1090,6 +1520,8 @@ export function App() {
                           onPrice={onPrice}
                           pinned={pins.includes(row.recipe.id)}
                           onTogglePin={onTogglePin}
+                          listed={listedIds.includes(row.recipe.id)}
+                          onAddToList={addToList}
                         />
                       ))}
                     </tbody>
