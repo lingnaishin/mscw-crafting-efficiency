@@ -29,14 +29,16 @@ import {
   type MarketFile,
 } from "./lib/prices";
 import type { Catalog, PriceOverrides, Recipe, ScoredRecipe } from "./lib/types";
+import { CombatPage } from "./CombatPage";
 
 const DATA = catalog as Catalog;
 
 const LIST_SLUG = "list";
+const COMBAT_SLUG = "oneshot";
 
 function readHash() {
   const slug = window.location.hash.replace(/^#\/?/, "");
-  if (slug === LIST_SLUG) return LIST_SLUG;
+  if (slug === LIST_SLUG || slug === COMBAT_SLUG) return slug;
   return DISCIPLINES.some((d) => d.slug === slug) ? slug : "";
 }
 
@@ -1265,11 +1267,17 @@ export function App() {
   };
 
   const onList = view === LIST_SLUG;
-  const current = onList ? undefined : DISCIPLINES.find((d) => d.slug === view);
+  const onCombat = view === COMBAT_SLUG;
+  const onTool = onList || onCombat;
+  const current = onTool ? undefined : DISCIPLINES.find((d) => d.slug === view);
   const disciplineRows = current ? scored.filter((row) => row.recipe.discipline === current.name) : [];
   const openList = () => {
     window.location.hash = `/${LIST_SLUG}`;
     setView(LIST_SLUG);
+  };
+  const openCombat = () => {
+    window.location.hash = `/${COMBAT_SLUG}`;
+    setView(COMBAT_SLUG);
   };
 
   return (
@@ -1324,13 +1332,18 @@ export function App() {
           Craft list
           {craftList.items.length > 0 ? ` (${craftList.items.length})` : ""}
         </button>
+        <button className={`btn ${onCombat ? "active" : ""}`} onClick={openCombat}>
+          One-shot
+        </button>
       </div>
 
-      <div className="stats">
-        <span className="badge">{scored.length} recipes</span>
-        <span className="badge profit">{profitable.length} profit-positive</span>
-        <span className="badge">{complete.length} fully priced</span>
-      </div>
+      {!onTool && (
+        <div className="stats">
+          <span className="badge">{scored.length} recipes</span>
+          <span className="badge profit">{profitable.length} profit-positive</span>
+          <span className="badge">{complete.length} fully priced</span>
+        </div>
+      )}
 
       {onList && (
         <>
@@ -1343,7 +1356,18 @@ export function App() {
         </>
       )}
 
-      {!current && !onList && (
+      {onCombat && (
+        <>
+          <div className="crumbs">
+            <button className="btn ghost" onClick={() => { window.location.hash = ""; setView(""); }}>
+              ← All disciplines
+            </button>
+          </div>
+          <CombatPage />
+        </>
+      )}
+
+      {!current && !onTool && (
         <LevelPlanner
           priced={priced}
           onPrice={onPrice}
@@ -1354,7 +1378,7 @@ export function App() {
         />
       )}
 
-      {!current && !onList && (
+      {!current && !onTool && (
         <>
           <section className="grid">
             {DISCIPLINES.map((d) => {

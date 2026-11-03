@@ -683,6 +683,96 @@ tr.best-row td {
   align-items: start;
 }
 
+.combat-page {
+  margin: 0 0 28px;
+}
+
+.combat-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.combat-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--panel-2);
+}
+
+.combat-panel h3 {
+  margin: 0 0 12px;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.15rem;
+}
+
+.combat-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.combat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.combat-field input,
+.combat-field select {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #101722;
+  color: var(--text);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+
+.combat-results {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 12px;
+}
+
+.combat-result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.combat-result-row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.combat-shot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.combat-shot-table th,
+.combat-shot-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.badge.loss {
+  background: rgba(255, 123, 123, 0.12);
+  color: var(--loss);
+}
+
 tr.covered-row td {
   color: var(--muted);
 }
@@ -699,6 +789,11 @@ tr.covered-row td {
   }
 
   .list-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .combat-panels,
+  .combat-form {
     grid-template-columns: 1fr;
   }
 }
