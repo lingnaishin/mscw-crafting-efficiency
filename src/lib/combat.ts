@@ -1,65 +1,104 @@
-/** Combat formulas from https://meowdb.com/msclassic/formulas */
+/** Combat formulas from https://meowdb.com/msclassic/formulas — mage-focused. */
 
-export type JobClass = "beginner" | "warrior" | "bowman" | "thief" | "magician";
-export type DamageMode = "weapon" | "spell";
+export type Element = "none" | "fire" | "ice" | "lightning" | "poison";
+export type ElementRelation = "immune" | "strong" | "weak" | "neutral";
 
-export type WeaponKind =
-  | "1h_sword"
-  | "2h_sword"
-  | "1h_axe_blunt"
-  | "2h_axe_blunt"
-  | "spear"
-  | "polearm"
-  | "dagger"
-  | "bow_xbow_claw"
-  | "wand_staff"
-  | "lucky_seven"
-  | "drain"
-  | "projectile";
+export type MageSkillId =
+  | "claw"
+  | "bolt"
+  | "fire"
+  | "poison"
+  | "cold"
+  | "thunder";
 
-export const JOB_OPTIONS: { id: JobClass; label: string }[] = [
-  { id: "beginner", label: "Beginner" },
-  { id: "warrior", label: "Warrior" },
-  { id: "bowman", label: "Bowman" },
-  { id: "thief", label: "Thief" },
-  { id: "magician", label: "Magician" },
+export type MageSkill = {
+  id: MageSkillId;
+  name: string;
+  element: Element;
+  max: number;
+  hits: number;
+  jobLevel: number;
+  /** Skill power % at a given rank (MeowDB Basic Attack). */
+  powerAt: (rank: number) => number;
+  /** Spell mastery level at a given rank. */
+  masteryAt: (rank: number) => number;
+};
+
+/** Magician attack skills used for one-shot odds. Powers from NiaDB skill pages. */
+export const MAGE_SKILLS: MageSkill[] = [
+  {
+    id: "claw",
+    name: "Magic Claw",
+    element: "none",
+    max: 20,
+    hits: 2,
+    jobLevel: 8,
+    powerAt: (r) => (r >= 20 ? 65 : 44 + r),
+    masteryAt: (r) => (r >= 20 ? 10 : Math.max(1, Math.floor(r / 2))),
+  },
+  {
+    id: "bolt",
+    name: "Energy Bolt",
+    element: "none",
+    max: 20,
+    hits: 1,
+    jobLevel: 8,
+    powerAt: (r) => (r >= 20 ? 130 : 88 + 2 * r),
+    masteryAt: (r) => (r >= 20 ? 10 : Math.max(1, Math.floor(r / 2))),
+  },
+  {
+    id: "fire",
+    name: "Fire Arrow",
+    element: "fire",
+    max: 30,
+    hits: 1,
+    jobLevel: 30,
+    powerAt: (r) => (r >= 30 ? 180 : 118 + 2 * r),
+    masteryAt: (r) => (r >= 30 ? 10 : Math.max(1, Math.floor(r / 3))),
+  },
+  {
+    id: "poison",
+    name: "Poison Breath",
+    element: "poison",
+    max: 30,
+    hits: 1,
+    jobLevel: 30,
+    powerAt: (r) => (r >= 30 ? 90 : 59 + r),
+    masteryAt: (r) => (r >= 30 ? 10 : Math.max(1, Math.floor(r / 3))),
+  },
+  {
+    id: "cold",
+    name: "Cold Beam",
+    element: "ice",
+    max: 30,
+    hits: 1,
+    jobLevel: 30,
+    powerAt: (r) => (r >= 30 ? 170 : 108 + 2 * r),
+    masteryAt: (r) => (r >= 30 ? 10 : Math.max(1, Math.floor(r / 3))),
+  },
+  {
+    id: "thunder",
+    name: "Thunder Bolt",
+    element: "lightning",
+    max: 30,
+    hits: 1,
+    jobLevel: 30,
+    powerAt: (r) => (r >= 30 ? 70 : 39 + r),
+    masteryAt: (r) => (r >= 30 ? 10 : Math.max(1, Math.floor(r / 3))),
+  },
 ];
 
-export const WEAPON_OPTIONS: { id: WeaponKind; label: string; mult: number }[] = [
-  { id: "1h_sword", label: "1H Sword (×1.8)", mult: 1.8 },
-  { id: "2h_sword", label: "2H Sword (×2.5)", mult: 2.5 },
-  { id: "1h_axe_blunt", label: "1H Axe / Blunt avg (×1.92)", mult: 1.92 },
-  { id: "2h_axe_blunt", label: "2H Axe / Blunt avg (×2.6)", mult: 2.6 },
-  { id: "spear", label: "Spear avg (×2.3)", mult: 2.3 },
-  { id: "polearm", label: "Polearm avg (×2.7)", mult: 2.7 },
-  { id: "dagger", label: "Dagger avg (×1.4)", mult: 1.4 },
-  { id: "bow_xbow_claw", label: "Bow / Xbow / Claw shoot (×2.5)", mult: 2.5 },
-  { id: "wand_staff", label: "Wand / Staff physical (×1.8)", mult: 1.8 },
-  { id: "lucky_seven", label: "Lucky Seven (×3.0)", mult: 3.0 },
-  { id: "drain", label: "Drain (×2.5)", mult: 2.5 },
-  { id: "projectile", label: "Projectile shoot (×2.5)", mult: 2.5 },
-];
+export function getMageSkill(id: MageSkillId) {
+  return MAGE_SKILLS.find((s) => s.id === id) ?? MAGE_SKILLS[0];
+}
 
-export function masteryFactor(masteryLevel: number, fixed?: number) {
-  if (fixed != null) return fixed;
+export function masteryFactor(masteryLevel: number) {
   return (masteryLevel / 10 + 0.1) * 0.7;
 }
 
-export function classAccuracy(
-  job: JobClass,
-  level: number,
-  dex: number,
-  luk: number,
-  intStat: number
-) {
-  if (job === "magician") {
-    return Math.floor((1.2 * intStat + 2 * level + 0.6 * luk) / 5.1 + 20);
-  }
-  const common = 1.2 * dex + 2 * level + 0.6 * luk;
-  if (job === "beginner") return Math.floor(common / 2.5 + 5);
-  if (job === "warrior") return Math.floor(common / 2.5 + 10);
-  if (job === "bowman") return Math.floor(common / 4.8 + 20);
-  return Math.floor(common / 4 + 15);
+/** Magician ACC from MeowDB. */
+export function mageAccuracy(level: number, intStat: number, luk: number) {
+  return Math.floor((1.2 * intStat + 2 * level + 0.6 * luk) / 5.1 + 20);
 }
 
 /** Chance to hit from MeowDB Stats & Accuracy. */
@@ -96,30 +135,6 @@ export function finalizeDamage(value: number) {
   return Math.trunc(Math.min(99999, Math.max(1, value)));
 }
 
-export function weaponDamageRange(opts: {
-  skillDamagePct: number;
-  masteryLevel: number;
-  totalWatk: number;
-  primary: number;
-  secondary: number;
-  weaponMult: number;
-  attackPower?: number;
-  luckySeven?: boolean;
-}) {
-  const S = opts.skillDamagePct / 100;
-  const M = opts.luckySeven ? 0.5 : masteryFactor(opts.masteryLevel);
-  const watk = opts.totalWatk;
-  const wm = opts.weaponMult;
-  const ap = opts.attackPower ?? 0;
-  const statDiv = 100;
-  const apDiv = 50;
-  const min =
-    S * watk * (0.8 + (opts.primary * M * wm + opts.secondary) / statDiv + ap / apDiv);
-  const max =
-    S * watk * (1.0 + (opts.primary * wm + opts.secondary) / statDiv + ap / apDiv);
-  return { min, max, avg: (min + max) / 2 };
-}
-
 export function spellDamageRange(opts: {
   skillPowerPct: number;
   masteryLevel: number;
@@ -140,26 +155,56 @@ export function damageAfterMods(
   def: number,
   mobLevel: number,
   playerLevel: number,
-  elementMult = 1,
-  skillBonus = 1
+  elementMult = 1
 ) {
   const scale = levelScale(mobLevel, playerLevel);
   const toFinal = (raw: number) =>
-    finalizeDamage(applyDefense(raw * skillBonus * elementMult, def) * scale);
+    finalizeDamage(applyDefense(raw * elementMult, def) * scale);
   const a = toFinal(rawMin);
   const b = toFinal(rawMax);
   return { min: Math.min(a, b), max: Math.max(a, b) };
 }
 
-/** Discrete uniform P(damage >= hp) for one hit in [min, max]. */
-export function pOneHitKill(min: number, max: number, hp: number) {
-  if (hp <= 0) return 1;
-  if (max < hp) return 0;
-  if (min >= hp) return 1;
-  return (max - hp + 1) / (max - min + 1);
+/** Parse MeowDB trait text for a mage element. */
+export function elementRelation(traits: string, element: Element): ElementRelation {
+  if (element === "none") return "neutral";
+  const t = traits.toLowerCase();
+  const e = element.toLowerCase();
+  if (t.includes(`${e} immune`)) return "immune";
+  if (t.includes(`${e} strong`) || t.includes(`${e} resistant`)) return "strong";
+  if (t.includes(`${e} weak`)) return "weak";
+  return "neutral";
 }
 
-/** Distribution of one hit: map damage -> probability mass. */
+/** Weak 1.25× · resistant 0.75× · immune 0× (MeowDB / wiki). */
+export function elementMult(traits: string, element: Element) {
+  const rel = elementRelation(traits, element);
+  if (rel === "immune") return 0;
+  if (rel === "strong") return 0.75;
+  if (rel === "weak") return 1.25;
+  return 1;
+}
+
+export function elementLabel(element: Element) {
+  if (element === "none") return "Neutral";
+  return element.charAt(0).toUpperCase() + element.slice(1);
+}
+
+export function relationLabel(rel: ElementRelation) {
+  if (rel === "immune") return "Immune";
+  if (rel === "strong") return "Resist";
+  if (rel === "weak") return "Weak";
+  return "Neutral";
+}
+
+/** Mage elemental affinities listed on the monster (fire/ice/lightning/poison). */
+export function mageElementTags(traits: string) {
+  const elements: Element[] = ["fire", "ice", "lightning", "poison"];
+  return elements
+    .map((el) => ({ element: el, relation: elementRelation(traits, el) }))
+    .filter((t) => t.relation !== "neutral");
+}
+
 function oneHitDist(min: number, max: number) {
   const span = max - min + 1;
   const p = 1 / span;
@@ -168,7 +213,6 @@ function oneHitDist(min: number, max: number) {
   return dist;
 }
 
-/** Convolve two damage distributions. */
 function convolve(a: Map<number, number>, b: Map<number, number>) {
   const out = new Map<number, number>();
   for (const [da, pa] of a) {
@@ -180,7 +224,6 @@ function convolve(a: Map<number, number>, b: Map<number, number>) {
   return out;
 }
 
-/** P(sum of k i.i.d. discrete uniforms in [min,max] >= hp). */
 export function pKHitsKill(k: number, min: number, max: number, hp: number) {
   if (k <= 0) return hp <= 0 ? 1 : 0;
   if (k * max < hp) return 0;

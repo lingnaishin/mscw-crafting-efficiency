@@ -1316,18 +1316,22 @@ export function App() {
         </aside>
       </header>
 
-      <div className="disclaimer">
-        Mat cost uses MesoWatch typical sale (ask if no sale), plus the craft fee. Override any price in the tables.{" "}
-        <strong>Net · NPC</strong> is NPC sell-back − cost. <strong>Net · typical</strong> is typical sale − cost.
-      </div>
+      {!onCombat && (
+        <div className="disclaimer">
+          Mat cost uses MesoWatch typical sale (ask if no sale), plus the craft fee. Override any price in the tables.{" "}
+          <strong>Net · NPC</strong> is NPC sell-back − cost. <strong>Net · typical</strong> is typical sale − cost.
+        </div>
+      )}
 
       <div className="toolbar">
-        <input
-          className="search"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search recipes or materials"
-        />
+        {!onCombat && (
+          <input
+            className="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search recipes or materials"
+          />
+        )}
         <button className={`btn ${onList ? "active" : ""}`} onClick={openList}>
           Craft list
           {craftList.items.length > 0 ? ` (${craftList.items.length})` : ""}
@@ -1360,7 +1364,7 @@ export function App() {
         <>
           <div className="crumbs">
             <button className="btn ghost" onClick={() => { window.location.hash = ""; setView(""); }}>
-              ← All disciplines
+              ← Crafting home
             </button>
           </div>
           <CombatPage />
